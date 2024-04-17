@@ -62,7 +62,7 @@ async function updateDb(language, sourceRoot, command) {
     }
 
     try {
-        await executeCommand(cmd);
+        await codeqlCmd(cmd);
         await loadDatabase(database);
     } catch (error) {
         console.error('Error occurred during database update:', error.message);
@@ -119,7 +119,7 @@ async function cleanupDbFolder(folderPath) {
     }
 }
 
-async function executeCommand(cmd) {
+async function codeqlCmd(cmd) {
     return new Promise((resolve, reject) => {
         // Show progress bar
         const progressOptions = { location: vscode.ProgressLocation.Notification, title: "Creating CodeQL database" };
@@ -129,9 +129,11 @@ async function executeCommand(cmd) {
             child_process.execFile(cmd[0], cmd.slice(1), (error, stdout, stderr) => {
                 if (error) {
                     reject(error);
+                } if (stderr) {
+                    resolve (stderr);
                 }
                 resolve(stdout);
-            }).on('exit', (code) => {
+            }).on('close', (code) => {
                 // Update progress to completion
                 progress.report({ increment: 100 });
                 resolve(code);
