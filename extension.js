@@ -42,6 +42,7 @@ async function activate(context) {
             prompt: "Enter your build command"
         }) : undefined;
         await updateDb(language.value, uri.fsPath, command);
+        await vscode.window.showInformationMessage("Finishing building CodeQL database and has already set it as current database for analyzing.")
     }    
 
     context.subscriptions.push(build, nobuild);
