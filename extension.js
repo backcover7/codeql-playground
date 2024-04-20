@@ -42,7 +42,6 @@ async function activate(context) {
             prompt: "Enter your build command"
         }) : undefined;
         await updateDb(language.value, uri.fsPath, command);
-        await vscode.window.showInformationMessage("Finishing building CodeQL database and has already set it as current database for analyzing.")
     }    
 
     context.subscriptions.push(build, nobuild);
@@ -57,14 +56,13 @@ async function updateDb(language, sourceRoot, command) {
     let database = await sanitizePath(path.join(sourceRoot, "sample_" + Date.now()));
     let cmd;
     if (command) {
-        cmd = ['codeql', 'database', 'create', database, '--language=' + language, '--source-root', sourceRoot, '--command', command, '--overwrite'];
+        cmd = `codeql database create ${database} --language=${language} --source-root ${sourceRoot} --command ${command} --overwrite`;
     } else {
-        cmd = ['codeql', 'database', 'create', database, '--language=' + language, '--source-root', sourceRoot, '--build-mode=none', '--overwrite'];
+        cmd = `codeql database create ${database} --language=${language} --source-root ${sourceRoot} --build-mode=none --overwrite`;
     }
 
     try {
-        await codeqlCmd(cmd);
-        await loadDatabase(database);
+        await codeqlCmd(cmd).then(() => loadDatabase(database));
     } catch (error) {
         console.error('Error occurred during database update:', error.message);
     }
@@ -121,27 +119,49 @@ async function cleanupDbFolder(folderPath) {
 }
 
 async function codeqlCmd(cmd) {
-    return new Promise((resolve, reject) => {
-        // Show progress bar
-        const progressOptions = { location: vscode.ProgressLocation.Notification, title: "Creating CodeQL database" };
-        vscode.window.withProgress(progressOptions, async (progress) => {
-            progress.report({ increment: 0 });
+    const progressOptions = {
+        location: vscode.ProgressLocation.Notification,
+        title: "Creating CodeQL database"
+    };
 
-            child_process.execFile(cmd[0], cmd.slice(1), (error, stdout, stderr) => {
-                if (error) {
+    try {
+        const progress = await vscode.window.withProgress(progressOptions, async (progress) => {
+            progress.report({ increment: 0, message: "Starting CodeQL database creation" });
+
+            const child = child_process.spawn(cmd, { shell: true });
+
+            child.stderr.on('data', (data) => {
+                console.log(data.toString());
+                progress.report({ increment: 2, message: data.toString() });
+            });
+
+            child.stdout.on('data', (data) => {
+                console.log(data.toString());
+                progress.report({ increment: 1, message: data.toString() });
+            });
+
+            await new Promise((resolve, reject) => {
+                child.on('exit', (code, signal) => {
+                    console.log(`exit ${code} ${signal}`);
+                    if (code != 0) {
+                        reject(new Error(`Command failed with code ${code}: ${stderr}`));
+                    }
+                    progress.report({ increment: 100, message: "CodeQL database creation completed." });
+                    resolve();
+                });
+
+                child.on('error', (error) => {
+                    console.log(error);
                     reject(error);
-                } if (stderr) {
-                    resolve (stderr);
-                }
-                resolve(stdout);
-            }).on('close', (code) => {
-                // Update progress to completion
-                progress.report({ increment: 100 });
-                resolve(code);
+                });
             });
         });
-    });
+
+    } catch (err) {
+        console.log(err);
+    }
 }
+
 
 async function sanitizePath(inputPath) {
     const absolutePath = path.resolve(inputPath);
@@ -152,9 +172,9 @@ async function sanitizePath(inputPath) {
     }
 }
 
-async function loadDatabase(databasPath) {
-    // vscode.commands.executeCommand("codeQLDatabases.removeDatabase", oldDatabase); //todo
-    vscode.commands.executeCommand("codeQL.setCurrentDatabase", vscode.Uri.file(databasPath));
+async function loadDatabase(databasePath) {
+    await vscode.commands.executeCommand("codeQL.setCurrentDatabase", vscode.Uri.file(databasePath));
+    vscode.window.showInformationMessage("Finished building CodeQL database and set it as current database for analyzing.");
 }
 
 module.exports = {
